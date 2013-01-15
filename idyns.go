@@ -96,12 +96,12 @@ func handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 func serve(net, name, secret string) {
 	switch name {
 	case "":
-		err := dns.ListenAndServe(":8053", net, nil)
+		err := dns.ListenAndServe(":53", net, nil)
 		if err != nil {
 			fmt.Printf("Failed to setup the "+net+" server: %s\n", err.Error())
 		}
 	default:
-		server := &dns.Server{Addr: ":8053", Net: net, TsigSecret: map[string]string{name: secret}}
+		server := &dns.Server{Addr: ":53", Net: net, TsigSecret: map[string]string{name: secret}}
 		err := server.ListenAndServe()
 		if err != nil {
 			fmt.Printf("Failed to setup the "+net+" server: %s\n", err.Error())
@@ -140,7 +140,7 @@ func main() {
 	dns.HandleFunc("version.server.", dns.HandleVersion)
 	go serve("tcp", name, secret)
 	go serve("udp", name, secret)
-	go serveHTTP()
+	go handleHTTP()
 	sig := make(chan os.Signal)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 forever:

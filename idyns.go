@@ -106,13 +106,12 @@ func serve(net, name, secret string) {
 	}
 }
 
-
 func addZoneHandles() {
-    client := connectToRedis()
-    zones := client.Keys("zone:*").Val()
-    for i := 0; i < len(zones); i++ {
-        dns.HandleFunc(zones[i][5:], handleRequest)
-    }
+	client := connectToRedis()
+	zones := client.Keys("zone:*").Val()
+	for i := 0; i < len(zones); i++ {
+		dns.HandleFunc(zones[i][5:], handleRequest)
+	}
 }
 
 func main() {
@@ -139,7 +138,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-    addZoneHandles()
+	addZoneHandles()
 	dns.HandleFunc("authors.bind.", dns.HandleAuthors)
 	dns.HandleFunc("authors.server.", dns.HandleAuthors)
 	dns.HandleFunc("version.bind.", dns.HandleVersion)

@@ -13,7 +13,6 @@ Access Authentication":
 
 package main
 
-
 import (
 	"encoding/base64"
 	"errors"
@@ -57,11 +56,11 @@ func NewBasicFromRequest(r *http.Request) (*Basic, error) {
 	return nil, err
 }
 
-
 type Basic struct {
 	Username string
 	Password string
 }
+
 func NewBasic(credentials string) (*Basic, error) {
 	if b, err := base64.StdEncoding.DecodeString(credentials); err == nil {
 		parts := strings.Split(string(b), ":")

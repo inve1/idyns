@@ -5,7 +5,7 @@ import (
 	"github.com/vmihailenco/redis"
 	"log"
 	"net/http"
-	"regexp"
+//	"regexp"
     "github.com/gorilla/mux"
     "github.com/jameskeane/bcrypt"
 )
@@ -15,6 +15,7 @@ func connectToRedis() *redis.Client {
     return redis.NewTCPClient("localhost:6379", password, -1) 
 }
 
+/* 
 func serveHTTP() {
 
 	http.HandleFunc("/nic/update", func(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +37,8 @@ func serveHTTP() {
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
 }
+*
+Dyndns implementation, let's leave this out for now*/
 
 
 func getSecret(user, realm string) string {
@@ -45,7 +48,6 @@ func getSecret(user, realm string) string {
 }
 
 func checkAdm(auth *Basic) bool {
-    return true
     client := connectToRedis()
     defer client.Close()
     if checkUserPass(auth.Username, auth.Password, client) {
@@ -59,9 +61,7 @@ func checkAdm(auth *Basic) bool {
 // Returns false if the password does not match or if the user is not there
 func checkUserPass(user string, pass string, client *redis.Client) bool {
     if client.Exists("user:" + user).Val() {
-        if bcrypt.Match(pass, client.HMGet("user:" + user, "password").Val()[0].(string)) {
-            return true
-        }
+        return bcrypt.Match(pass, client.HMGet("user:" + user, "password").Val()[0].(string))
     }
     return false
 }
@@ -78,11 +78,37 @@ func checkPerm(auth *Basic, name string) bool {
     return false
 }
 
-func NameGet(w http.ResponseWriter, r *http.Request) {}
+func NameGet(w http.ResponseWriter, r *http.Request) {
+    name := mux.Vars(r)["name"]
+    client := connectToRedis()
+    defer client.Close()
+    if client.Exists("rr:" + name).Val() {
+        fields := client.HGetAll("rr:" + name).Val()
+        fmt.Fprintf(w, "{")
+        for i := 0; i < len(fields); i = i + 2 {
+            fmt.Fprintf(w, "\"%v\": \"%v\", ", fields[i], fields[i + 1])
+        }
+        fmt.Fprintf(w, "}")
+    } else {
+        http.Error(w, "", 404)
+    }
+}
 
 
+// Not checking for authentication in GET requests, assuming all data is public
+func NameGetType(w http.ResponseWriter, r *http.Request) {
+    name := mux.Vars(r)["name"]
+    rrtype := mux.Vars(r)["type"]
+    client := connectToRedis()
+    defer client.Close()
+    if client.HExists("rr:" + name, rrtype).Val() {
+        fmt.Fprintf(w, "{\"value\": \"%v\"}",
+                client.HGet("rr:" + name, rrtype).Val())
+    } else {
+        http.Error(w, "", 404)
+    }
+}
 
-func NameGetType(w http.ResponseWriter, r *http.Request) {}
 func NamePutType(w http.ResponseWriter, r *http.Request) {}
 func NamePostType(w http.ResponseWriter, r *http.Request) {
     name := mux.Vars(r)["name"]
@@ -161,16 +187,42 @@ func UserDelete(w http.ResponseWriter, r *http.Request) {
 
 }
 
+
+func ZonePost(w http.ResponseWriter, r *http.Request) {
+    name := mux.Vars(r)["name"]
+    admin := r.FormValue("admin")
+    auth, _ := NewBasicFromRequest(r)
+    if checkAdm(auth)  { 
+        client := connectToRedis()
+        defer client.Close()
+        if client.Exists("zone:" + name).Val() {
+            http.Error(w, "", 409)
+        } else {
+            client.HMSet("zone:" + name, "admin", admin)
+            fmt.Fprintf(w, "") 
+        }
+    } else {
+        http.Error(w, "", 403)
+    }
+
+}
+
+
+func ZonePut(w http.ResponseWriter, r *http.Request) {}
+
 func handleHTTP() {
     r := mux.NewRouter()
     subRR := r.PathPrefix("/RR").Subrouter()
     subU := r.PathPrefix("/u").Subrouter()
+    subZone := r.PathPrefix("/z").Subrouter()
     subRR.HandleFunc("/{name}/", NameGet).Name("nameget").Methods("GET")
     subRR.HandleFunc("/{name}/{type}/", NameGetType).Name("namegettype").Methods("GET")
     subRR.HandleFunc("/{name}/{type}/", NamePutType).Name("nameputtype").Methods("PUT")
     subRR.HandleFunc("/{name}/{type}/", NamePostType).Name("nameposttype").Methods("POST")
     subRR.HandleFunc("/{name}/{type}/", NameDeleteType).Name("namedeletetype").Methods("DELETE")
 
+    subZone.HandleFunc("/{name}/", ZonePost).Name("zonepost").Methods("POST")
+    subZone.HandleFunc("/{name}/", ZonePut).Name("zoneput").Methods("PUT")
 //    subU.HandleFunc("/{username}/", NameDeleteType).Name("nameget").Methods("GET") Don't know yet
     subU.HandleFunc("/{username}/", UserPut).Name("userput").Methods("PUT")
     subU.HandleFunc("/{username}/", UserPost).Name("userpost").Methods("POST")

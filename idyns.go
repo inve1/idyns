@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"github.com/miekg/dns"
-	"github.com/vmihailenco/redis"
 	"log"
 	"os"
 	"os/signal"
@@ -47,9 +46,7 @@ func logStuff(form string, a ...interface{}) {
 }
 
 func getRRStr(q dns.Question) (string, bool) {
-	password := "" // no password set
-	//db := -1 // use default DB
-	client := redis.NewTCPClient("localhost:6379", password, -1)
+	client := connectToRedis()
 	defer client.Close()
 	res := client.HMGet("rr:"+q.Name, "TTL", "CLASS", dns.TypeToString[q.Qtype]).Val()
 	if res == nil {
@@ -109,6 +106,15 @@ func serve(net, name, secret string) {
 	}
 }
 
+
+func addZoneHandles() {
+    client := connectToRedis()
+    zones := client.Keys("zone:*").Val()
+    for i := 0; i < len(zones); i++ {
+        dns.HandleFunc(zones[i][5:], handleRequest)
+    }
+}
+
 func main() {
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	printf = flag.Bool("print", false, "print replies")
@@ -133,7 +139,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	dns.HandleFunc("oggettone.com.", handleRequest)
+    addZoneHandles()
 	dns.HandleFunc("authors.bind.", dns.HandleAuthors)
 	dns.HandleFunc("authors.server.", dns.HandleAuthors)
 	dns.HandleFunc("version.bind.", dns.HandleVersion)

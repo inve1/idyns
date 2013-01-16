@@ -107,7 +107,24 @@ func NameGetType(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NamePutType(w http.ResponseWriter, r *http.Request) {}
+func NamePutType(w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["name"]
+	rrtype := mux.Vars(r)["type"]
+	rrvalue := r.FormValue("value")
+	auth, _ := NewBasicFromRequest(r)
+	if checkPerm(auth, name) {
+		client := connectToRedis()
+		defer client.Close()
+		if client.HExists("rr:" + name, rrtype).Val() {
+			client.HMSet("rr:" + name, rrtype, rrvalue)
+		} else {
+            http.Error(w, "", 404)
+		}
+	} else {
+		http.Error(w, "", 403)
+	}
+
+}
 func NamePostType(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	rrtype := mux.Vars(r)["type"]
@@ -119,6 +136,10 @@ func NamePostType(w http.ResponseWriter, r *http.Request) {
 		if client.HExists("rr:"+name, rrtype).Val() {
 			http.Error(w, "", 409)
 		} else {
+            if !client.Exists("rr:" + name).Val() {
+                client.HMSet("rr:" + name, "CLASS", "IN")
+                client.HMSet("rr:" + name, "TTL", "3600")
+            }
 			client.HMSet("rr:"+name, rrtype, rrvalue)
 			fmt.Fprintf(w, "")
 		}

@@ -58,7 +58,7 @@ func getRRStr(q dns.Question) (string, bool) {
 		return "", true
 	}
 	if res[1] == nil {
-		logStuff("RR for %v is malformed: CNAME missing", q.Name)
+		logStuff("RR for %v is malformed: CLASS missing", q.Name)
 		return "", true
 	}
 	if res[2] == nil {

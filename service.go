@@ -65,7 +65,7 @@ func checkUserPass(user string, pass string, client *redis.Client) bool {
 	return false
 }
 
-func checkPerm(auth *Basic, name string) bool {
+func checkPermRR(auth *Basic, name string) bool {
 	client := connectToRedis()
 	defer client.Close()
 	if checkUserPass(auth.Username, auth.Password, client) {
@@ -73,6 +73,18 @@ func checkPerm(auth *Basic, name string) bool {
 			return true
 		}
 		return client.SIsMember("user:"+auth.Username+":permissions", name).Val()
+	}
+	return false
+}
+
+func checkPermUsr(auth *Basic, name string) bool {
+	client := connectToRedis()
+	defer client.Close()
+	if checkUserPass(auth.Username, auth.Password, client) {
+		if client.HGet("user:"+auth.Username, "isadmin").Val() == "1" {
+			return true
+		}
+		return auth.Username == name
 	}
 	return false
 }
@@ -112,13 +124,13 @@ func NamePutType(w http.ResponseWriter, r *http.Request) {
 	rrtype := mux.Vars(r)["type"]
 	rrvalue := r.FormValue("value")
 	auth, _ := NewBasicFromRequest(r)
-	if checkPerm(auth, name) {
+	if checkPermRR(auth, name) {
 		client := connectToRedis()
 		defer client.Close()
-		if client.HExists("rr:" + name, rrtype).Val() {
-			client.HMSet("rr:" + name, rrtype, rrvalue)
+		if client.HExists("rr:"+name, rrtype).Val() {
+			client.HMSet("rr:"+name, rrtype, rrvalue)
 		} else {
-            http.Error(w, "", 404)
+			http.Error(w, "", 404)
 		}
 	} else {
 		http.Error(w, "", 403)
@@ -130,16 +142,16 @@ func NamePostType(w http.ResponseWriter, r *http.Request) {
 	rrtype := mux.Vars(r)["type"]
 	rrvalue := r.FormValue("value")
 	auth, _ := NewBasicFromRequest(r)
-	if checkPerm(auth, name) {
+	if checkPermRR(auth, name) {
 		client := connectToRedis()
 		defer client.Close()
 		if client.HExists("rr:"+name, rrtype).Val() {
 			http.Error(w, "", 409)
 		} else {
-            if !client.Exists("rr:" + name).Val() {
-                client.HMSet("rr:" + name, "CLASS", "IN")
-                client.HMSet("rr:" + name, "TTL", "3600")
-            }
+			if !client.Exists("rr:" + name).Val() {
+				client.HMSet("rr:"+name, "CLASS", "IN")
+				client.HMSet("rr:"+name, "TTL", "3600")
+			}
 			client.HMSet("rr:"+name, rrtype, rrvalue)
 			fmt.Fprintf(w, "")
 		}
@@ -152,7 +164,7 @@ func NameDeleteType(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	rrtype := mux.Vars(r)["type"]
 	auth, _ := NewBasicFromRequest(r)
-	if checkPerm(auth, name) {
+	if checkPermRR(auth, name) {
 		client := connectToRedis()
 		defer client.Close()
 		if !client.HExists("rr:"+name, rrtype).Val() {
@@ -167,7 +179,25 @@ func NameDeleteType(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func UserPut(w http.ResponseWriter, r *http.Request) {}
+func UserPut(w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["username"]
+	password := r.FormValue("password")
+	auth, _ := NewBasicFromRequest(r)
+	if checkPermUsr(auth, name) {
+		client := connectToRedis()
+		defer client.Close()
+		if client.Exists("user:" + name).Val() {
+			hash, _ := bcrypt.Hash(password)
+			client.HMSet("user:"+name, "password", hash)
+			fmt.Fprintf(w, "")
+		} else {
+			http.Error(w, "", 404)
+		}
+	} else {
+		http.Error(w, "", 403)
+	}
+
+}
 func UserPost(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["username"]
 	isadmin := r.FormValue("isadmin")
@@ -188,6 +218,7 @@ func UserPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 }
+
 func UserDelete(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["username"]
 	auth, _ := NewBasicFromRequest(r)

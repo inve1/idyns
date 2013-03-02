@@ -3,42 +3,16 @@ package main
 import (
 	"fmt"
 	"github.com/vmihailenco/redis"
-	"log"
 	"net/http"
 	//	"regexp"
 	"github.com/gorilla/mux"
 	"github.com/jameskeane/bcrypt"
 )
 
-func connectToRedis() *redis.Client {
+var connectToRedis = func() *redis.Client {
 	password := "" // no password set
 	return redis.NewTCPClient("localhost:6379", password, -1)
 }
-
-/* 
-func serveHTTP() {
-
-	http.HandleFunc("/nic/update", func(w http.ResponseWriter, r *http.Request) {
-		hostname := r.FormValue("hostname")
-		myip := r.FormValue("myip")
-		reg, _ := regexp.Compile(`^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$`)
-		if reg.MatchString(myip) {
-			// TODO: authentication :P
-            client := connectToRedis()
-			defer client.Close()
-			client.HMSet("rr:"+hostname+".", "A", myip, "TTL", "3600", "CLASS", "IN")
-			logStuff("A RR for %v updated to %v", hostname, myip)
-			fmt.Fprintf(w, "good")
-		} else {
-			fmt.Fprintf(w, "bad")
-		}
-	})
-
-	log.Fatal(http.ListenAndServe(":8080", nil))
-
-}
-*
-Dyndns implementation, let's leave this out for now*/
 
 func getSecret(user, realm string) string {
 	client := connectToRedis()
@@ -47,6 +21,7 @@ func getSecret(user, realm string) string {
 }
 
 func checkAdm(auth *Basic) bool {
+    if auth != nil {
 	client := connectToRedis()
 	defer client.Close()
 	if checkUserPass(auth.Username, auth.Password, client) {
@@ -54,6 +29,7 @@ func checkAdm(auth *Basic) bool {
 			return true
 		}
 	}
+}
 	return false
 }
 
@@ -66,6 +42,7 @@ func checkUserPass(user string, pass string, client *redis.Client) bool {
 }
 
 func checkPermRR(auth *Basic, name string) bool {
+    if auth != nil {
 	client := connectToRedis()
 	defer client.Close()
 	if checkUserPass(auth.Username, auth.Password, client) {
@@ -74,10 +51,12 @@ func checkPermRR(auth *Basic, name string) bool {
 		}
 		return client.SIsMember("user:"+auth.Username+":permissions", name).Val()
 	}
+}
 	return false
 }
 
 func checkPermUsr(auth *Basic, name string) bool {
+    if auth != nil {
 	client := connectToRedis()
 	defer client.Close()
 	if checkUserPass(auth.Username, auth.Password, client) {
@@ -86,7 +65,9 @@ func checkPermUsr(auth *Basic, name string) bool {
 		}
 		return auth.Username == name
 	}
+}
 	return false
+
 }
 
 func NameGet(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +93,7 @@ func NameGetType(w http.ResponseWriter, r *http.Request) {
 	client := connectToRedis()
 	defer client.Close()
 	if client.HExists("rr:"+name, rrtype).Val() {
+        w.Header().Set("Content-type", "application/json")
 		fmt.Fprintf(w, "{\"value\": \"%v\"}",
 			client.HGet("rr:"+name, rrtype).Val())
 	} else {
@@ -151,6 +133,7 @@ func NamePostType(w http.ResponseWriter, r *http.Request) {
 			if !client.Exists("rr:" + name).Val() {
 				client.HMSet("rr:"+name, "CLASS", "IN")
 				client.HMSet("rr:"+name, "TTL", "3600")
+                client.LPush("user:" + auth.Username + ":permissions", name)
 			}
 			client.HMSet("rr:"+name, rrtype, rrvalue)
 			fmt.Fprintf(w, "")
@@ -198,11 +181,15 @@ func UserPut(w http.ResponseWriter, r *http.Request) {
 	}
 
 }
+
+
+// Only admins can create users, for now
 func UserPost(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["username"]
 	isadmin := r.FormValue("isadmin")
 	password := r.FormValue("password")
 	auth, _ := NewBasicFromRequest(r)
+    fmt.Printf("isadmin %v ps %v", isadmin, password)
 	if checkAdm(auth) {
 		client := connectToRedis()
 		defer client.Close()
@@ -210,7 +197,7 @@ func UserPost(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "", 409)
 		} else {
 			hash, _ := bcrypt.Hash(password)
-			client.HMSet("user:"+name, "isadmin", isadmin, "password", hash)
+			client.HMSet("user:"+name, "isadmin", "1", "password", hash)
 			fmt.Fprintf(w, "")
 		}
 	} else {
@@ -258,11 +245,13 @@ func ZonePost(w http.ResponseWriter, r *http.Request) {
 
 func ZonePut(w http.ResponseWriter, r *http.Request) {}
 
-func handleHTTP() {
+func createRouter() *mux.Router {
 	r := mux.NewRouter()
 	subRR := r.PathPrefix("/RR").Subrouter()
 	subU := r.PathPrefix("/u").Subrouter()
 	subZone := r.PathPrefix("/z").Subrouter()
+	subDyn := r.PathPrefix("/nic").Subrouter()
+    subDyn.HandleFunc("/update", DynUpdate)
 	subRR.HandleFunc("/{name}/", NameGet).Name("nameget").Methods("GET")
 	subRR.HandleFunc("/{name}/{type}/", NameGetType).Name("namegettype").Methods("GET")
 	subRR.HandleFunc("/{name}/{type}/", NamePutType).Name("nameputtype").Methods("PUT")
@@ -275,6 +264,5 @@ func handleHTTP() {
 	subU.HandleFunc("/{username}/", UserPut).Name("userput").Methods("PUT")
 	subU.HandleFunc("/{username}/", UserPost).Name("userpost").Methods("POST")
 	subU.HandleFunc("/{username}/", UserDelete).Name("userdelete").Methods("DELETE")
-	http.Handle("/", r)
-	log.Fatal(http.ListenAndServe(":8080", nil))
+    return r
 }

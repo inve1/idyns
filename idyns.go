@@ -28,6 +28,7 @@ import (
 	"runtime/pprof"
 	"strings"
 	"syscall"
+    "net/http"
 )
 
 const NAME = "IDYNS: "
@@ -62,8 +63,14 @@ func getRRStr(q dns.Question) (string, bool) {
 		return "", true
 	}
 	if res[2] == nil {
-		logStuff("No %v RR for %v", dns.TypeToString[q.Qtype], q.Name)
-		return "", true
+		logStuff("No %v RR for %v. Trying CNAME", dns.TypeToString[q.Qtype], q.Name)
+
+	    res = client.HMGet("rr:"+q.Name, "TTL", "CLASS", "CNAME").Val()
+        if res != nil && res[2] != nil {
+            q.Qtype = dns.StringToType["CNAME"]
+        } else {
+            return "", true
+        }
 	}
 	return fmt.Sprintf("%v %v %v %v %v", q.Name, res[0], res[1], dns.TypeToString[q.Qtype], res[2]), false
 }
@@ -113,6 +120,12 @@ func addZoneHandles() {
 		dns.HandleFunc(zones[i][5:], handleRequest)
 	}
 }
+
+func handleHTTP() {
+	http.Handle("/", createRouter())
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
 
 func main() {
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
